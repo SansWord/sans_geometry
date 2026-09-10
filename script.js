@@ -418,6 +418,10 @@
   const lastSampleDate = {};
   BODIES.forEach(b => { trails[b.key] = []; lastSampleDate[b.key] = null; });
 
+  // Geometry from the most recent geocentric render, used to hit-test trail
+  // hover (see "Trail hover tooltip" below). Set each frame in render().
+  let lastGeoRender = null;
+
   // Deferred until here (rather than run right after parsing ?years= above)
   // because startYearsRun -> clearAllTrails needs `trails`/`lastSampleDate`,
   // which aren't declared until this point.
@@ -448,7 +452,7 @@
     const last = lastSampleDate[key];
     if (last === null || Math.abs(sampleDate - last) / MS_PER_DAY >= threshold) {
       const arr = trails[key];
-      arr.push({ dx, dy });
+      arr.push({ dx, dy, date: sampleDate });
       if (arr.length > TRAIL_MAX_POINTS + TRAIL_TRIM_SLACK) {
         arr.splice(0, arr.length - TRAIL_MAX_POINTS);
       }
@@ -645,6 +649,11 @@
       const distances = [1].concat(others.map(b => b.a + 1));
       const toPx = makeScale(size, distances, state.geoZoom);
 
+      // Snapshot of the geometry used to draw trails this frame, so trail
+      // hover hit-testing (below) can map cursor position -> AU distance ->
+      // screen position the same way the trails themselves were drawn.
+      lastGeoRender = { cx, cy, toPx, others };
+
       // Calendar ring: Jan sits at 12 o'clock, so the Sun's position below
       // reads directly as "roughly which month".
       drawMonthRing(ctx, cx, cy, size / 2 - 6);
@@ -690,6 +699,69 @@
     return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) +
       " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   }
+
+  // ---------------------------------------------------------------------
+  // Trail hover tooltip (geocentric panel): find the sampled trail point
+  // nearest the cursor and show which planet was there and when. A body's
+  // geocentric loop retraces roughly the same screen position once per
+  // synodic period, so several sampled dates can sit under the cursor at
+  // once — among those, show the most recent (latest) date.
+  // ---------------------------------------------------------------------
+  const geoTooltip = document.getElementById("geoTooltip");
+  const geoPanelBody = geoCanvas.closest(".panel-body");
+  const TRAIL_HOVER_RADIUS_PX = 9;
+
+  function formatTrailDate(d) {
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function findHoveredTrailPoint(mx, my) {
+    if (!lastGeoRender) return null;
+    const { cx, cy, toPx, others } = lastGeoRender;
+    const radius2 = TRAIL_HOVER_RADIUS_PX * TRAIL_HOVER_RADIUS_PX;
+    let best = null; // { name, date, dist2 }
+    others.forEach(b => {
+      const points = trails[b.key];
+      for (const p of points) {
+        const dist = Math.hypot(p.dx, p.dy);
+        const angle = Math.atan2(p.dy, p.dx) + GEO_ROTATION_OFFSET;
+        const r = toPx(dist);
+        const { x, y } = geoXY(cx, cy, r, angle);
+        const dx = x - mx, dy = y - my;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > radius2) continue;
+        // Within hit radius: prefer the latest date, breaking ties on
+        // screen-distance so an exact cursor position still wins on
+        // closeness when dates are equal.
+        if (!best || p.date > best.date || (p.date.getTime() === best.date.getTime() && d2 < best.dist2)) {
+          best = { name: b.name, date: p.date, dist2: d2 };
+        }
+      }
+    });
+    return best;
+  }
+
+  function hideGeoTooltip() {
+    geoTooltip.hidden = true;
+  }
+
+  geoCanvas.addEventListener("mousemove", (e) => {
+    const rect = geoCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const hit = findHoveredTrailPoint(mx, my);
+    if (!hit) {
+      hideGeoTooltip();
+      return;
+    }
+    const bodyRect = geoPanelBody.getBoundingClientRect();
+    geoTooltip.style.left = `${e.clientX - bodyRect.left}px`;
+    geoTooltip.style.top = `${e.clientY - bodyRect.top}px`;
+    geoTooltip.innerHTML = `<span class="tip-planet">${hit.name}</span><br>${formatTrailDate(hit.date)}`;
+    geoTooltip.hidden = false;
+  });
+
+  geoCanvas.addEventListener("mouseleave", hideGeoTooltip);
 
   // ---------------------------------------------------------------------
   // Animation loop
