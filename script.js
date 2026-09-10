@@ -14,6 +14,15 @@
       zoom: "0.85",
       speed: "128",
     },
+    "venus-final-phase": {
+      planets: "sun,earth,venus",
+      date: "1435-04-16", // Venus at ~0% lit (new phase) — skip lands on the next full (~100%)
+      phase: "venus",
+      speed: "128", // already faster than Venus's calculated skip speed, so the skip keeps it as-is
+      // One-shot flag: fast-forward to Venus's next full/new extreme and
+      // auto-pause there. See the ?autoskip= handling below.
+      autoskip: "1",
+    },
   };
   const DEFAULT_DEMO = "mars-retrograde";
 
@@ -165,6 +174,14 @@
     const y = parseFloat(params.get("years"));
     if (!isNaN(y) && y > 0) requestedYearsOnLoad = y;
   }
+  // One-shot: fast-forward the phase widget to the next full/new extreme
+  // and auto-pause there, same as clicking the skip button by hand.
+  // Triggered once the skip button is wired up, below. The ?autoskip= flag
+  // itself is removed from the URL once the run actually completes (see
+  // the phase-run completion block in render()) so a reload or copied
+  // address-bar URL lands on the paused extreme instead of replaying the
+  // whole fast-forward.
+  const autoSkipOnLoad = params.has("autoskip") && params.get("autoskip") !== "0";
   state.trailsSince = new Date(state.simDate.getTime());
 
   // ---------------------------------------------------------------------
@@ -184,9 +201,14 @@
     planetListEl.appendChild(label);
   });
 
+  // A `null` value deletes that param instead of setting it — used to
+  // clear one-shot flags like ?autoskip= once they've been consumed.
   function syncUrlParams(params) {
     const url = new URL(location.href);
-    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    for (const [k, v] of Object.entries(params)) {
+      if (v === null) url.searchParams.delete(k);
+      else url.searchParams.set(k, v);
+    }
     history.replaceState(null, "", url);
   }
 
@@ -268,13 +290,171 @@
   phaseSkipBtn.addEventListener("click", () => {
     const body = PHASE_BODIES.find(b => b.key === state.phaseBody);
     const worstCaseDays = synodicPeriodDays(body) / 2; // extremes alternate every half synodic period
-    state.speed = Math.min(4096, Math.max(1 / 64, worstCaseDays / PHASE_SKIP_TARGET_WALL_SECONDS));
+    const calculatedSpeed = Math.ceil(Math.min(4096, Math.max(1 / 64, worstCaseDays / PHASE_SKIP_TARGET_WALL_SECONDS)));
+    const speedBeforeRun = state.speed; // restored once the run auto-pauses, below
+    // Only speed up, never slow down: if we're already going faster than
+    // the "worst case in ~4s" target, leave that alone rather than
+    // throttling down to it.
+    if (Math.abs(speedBeforeRun) < calculatedSpeed) state.speed = calculatedSpeed;
     updateSpeedLabel();
     state.playing = true;
     updatePlayPauseButton();
-    state.phaseRun = { active: true, baselineWaxing: null };
+    state.phaseRun = { active: true, baselineWaxing: null, speedBeforeRun };
     updatePhaseSkipAvailability();
     syncUrlParams({ speed: String(state.speed) });
+  });
+
+  if (autoSkipOnLoad && !PHASE_SKIP_DISABLED.has(state.phaseBody)) {
+    // Deferred: synodicPeriodDays() (called from the click handler) reads
+    // EARTH_PERIOD, a `const` initialized later in this same script — an
+    // immediate synchronous call here would hit it before that
+    // initialization runs. setTimeout(...,0) waits until the whole script
+    // has finished executing first.
+    setTimeout(() => phaseSkipBtn.click(), 0);
+  }
+
+  // ---------------------------------------------------------------------
+  // Phase widget: draggable position
+  // ---------------------------------------------------------------------
+  // Only draggable at the desktop breakpoint (DESKTOP_BREAKPOINT_PX,
+  // defined further below with the canvas-sizing code, matching the CSS
+  // media query) — below that the widget is a static full-width bar in
+  // normal flow, not an absolutely-positioned overlay, so there's nothing
+  // to drag. It exists because a high geoZoom can grow the orbit
+  // ring/month labels enough to intrude on whatever fixed corner the
+  // widget sits in — no single static position avoids that at every zoom
+  // level, and the fix may be to move it out of the Geocentric panel
+  // entirely (e.g. onto the empty Heliocentric side), not just to a
+  // different corner of the same panel.
+  //
+  // The widget still *lives* in the DOM inside the Geocentric panel's
+  // .panel-body (needed for the mobile, non-dragged, normal-flow layout —
+  // see the base, non-media-query .phase-widget rule in style.css). At the
+  // desktop breakpoint it's always repositioned by JS, though (see
+  // repositionPhaseWidgetOnResize below, called on load): switched to
+  // `position: fixed` via inline style, which is relative to the viewport
+  // regardless of DOM nesting (no ancestor here sets transform/filter/
+  // perspective, which would otherwise override that), so it can be placed
+  // — by default, or by a drag — anywhere across `.stage` (both panels
+  // together), not just within whichever panel it happens to be nested in.
+  // The plain CSS `position: absolute; top/left: 8px` corner in style.css
+  // only ever shows for the single frame before that JS repositioning runs.
+  //
+  // Position is stored/passed around as a fraction of .stage's free space
+  // (not raw px) so a saved position stays proportionally where it was
+  // across window resizes, and persisted in localStorage so a drag
+  // survives a reload.
+  const phaseWidget = document.getElementById("phaseWidget");
+  const phaseDragHandle = document.getElementById("phaseDragHandle");
+  const phaseWidgetStage = document.querySelector(".stage");
+  const PHASE_WIDGET_POS_KEY = "sansGeometry.phaseWidgetPos";
+
+  function loadPhaseWidgetPos() {
+    try {
+      const pos = JSON.parse(localStorage.getItem(PHASE_WIDGET_POS_KEY));
+      if (pos && typeof pos.xFrac === "number" && typeof pos.yFrac === "number") return pos;
+    } catch { /* corrupt/blocked storage — fall back to the default position */ }
+    return null;
+  }
+
+  // The out-of-the-box position (until the user drags it, or forever if
+  // they never do): horizontally centered between the two panels, just
+  // below the panel headings — clear of both circles regardless of
+  // geoZoom. DEFAULT_PHASE_WIDGET_TOP_PX is a target pixel gap from the
+  // stage top rather than a fixed yFrac, so it stays a small, roughly
+  // constant gap under the headings instead of drifting down
+  // proportionally to however tall the stage happens to be.
+  const DEFAULT_PHASE_WIDGET_TOP_PX = 28;
+  function computeDefaultPhaseWidgetPos() {
+    const stageRect = phaseWidgetStage.getBoundingClientRect();
+    const maxTop = Math.max(0, stageRect.height - phaseWidget.offsetHeight);
+    return {
+      xFrac: 0.5, // centered: widget-center === stage-center
+      yFrac: maxTop > 0 ? Math.min(1, DEFAULT_PHASE_WIDGET_TOP_PX / maxTop) : 0,
+    };
+  }
+
+  function applyPhaseWidgetPos(pos) {
+    phaseWidget.style.position = "fixed";
+    const stageRect = phaseWidgetStage.getBoundingClientRect();
+    const maxLeft = Math.max(0, stageRect.width - phaseWidget.offsetWidth);
+    const maxTop = Math.max(0, stageRect.height - phaseWidget.offsetHeight);
+    phaseWidget.style.left = `${Math.round(stageRect.left + pos.xFrac * maxLeft)}px`;
+    phaseWidget.style.top = `${Math.round(stageRect.top + pos.yFrac * maxTop)}px`;
+  }
+
+  // Re-applies the saved (or default) fraction against the current stage
+  // size. Called from resizeAll() below (which already runs on load once
+  // layout has settled, and again via its ResizeObserver) rather than
+  // measuring here directly — this file's own canvas-sizing code already
+  // notes that fonts/layout settle a tick after load, so reusing that same
+  // timing avoids reading a bogus stage size before things are ready.
+  function repositionPhaseWidgetOnResize() {
+    if (window.innerWidth < DESKTOP_BREAKPOINT_PX) {
+      // Clear any desktop-only `fixed` positioning (from a drag, or from
+      // applying the default/saved position above) so the mobile CSS rule
+      // — a static, full-width bar in normal flow, order:-1 — takes back
+      // over cleanly instead of leaving the widget floating at its last
+      // desktop pixel coordinates.
+      phaseWidget.style.position = "";
+      phaseWidget.style.left = "";
+      phaseWidget.style.top = "";
+      return;
+    }
+    applyPhaseWidgetPos(loadPhaseWidgetPos() || computeDefaultPhaseWidgetPos());
+  }
+
+  let phaseDrag = null;
+  phaseDragHandle.addEventListener("pointerdown", (e) => {
+    if (window.innerWidth < DESKTOP_BREAKPOINT_PX) return;
+    e.preventDefault();
+    // Re-anchor at the widget's current on-screen spot before switching to
+    // `fixed` — getBoundingClientRect() is viewport-relative under either
+    // position type, so this doesn't visually jump.
+    const widgetRect = phaseWidget.getBoundingClientRect();
+    phaseWidget.style.position = "fixed";
+    phaseWidget.style.left = `${widgetRect.left}px`;
+    phaseWidget.style.top = `${widgetRect.top}px`;
+    phaseDrag = {
+      pointerId: e.pointerId,
+      startLeft: widgetRect.left,
+      startTop: widgetRect.top,
+      startX: e.clientX,
+      startY: e.clientY,
+    };
+    phaseDragHandle.setPointerCapture(e.pointerId);
+  });
+
+  phaseDragHandle.addEventListener("pointermove", (e) => {
+    if (!phaseDrag || e.pointerId !== phaseDrag.pointerId) return;
+    const stageRect = phaseWidgetStage.getBoundingClientRect();
+    const minLeft = stageRect.left, minTop = stageRect.top;
+    const maxLeft = stageRect.left + Math.max(0, stageRect.width - phaseWidget.offsetWidth);
+    const maxTop = stageRect.top + Math.max(0, stageRect.height - phaseWidget.offsetHeight);
+    const left = Math.min(maxLeft, Math.max(minLeft, phaseDrag.startLeft + (e.clientX - phaseDrag.startX)));
+    const top = Math.min(maxTop, Math.max(minTop, phaseDrag.startTop + (e.clientY - phaseDrag.startY)));
+    phaseWidget.style.left = `${left}px`;
+    phaseWidget.style.top = `${top}px`;
+  });
+
+  function endPhaseWidgetDrag(e) {
+    if (!phaseDrag || e.pointerId !== phaseDrag.pointerId) return;
+    phaseDrag = null;
+    const stageRect = phaseWidgetStage.getBoundingClientRect();
+    const maxLeft = Math.max(0, stageRect.width - phaseWidget.offsetWidth);
+    const maxTop = Math.max(0, stageRect.height - phaseWidget.offsetHeight);
+    const widgetRect = phaseWidget.getBoundingClientRect();
+    const left = widgetRect.left - stageRect.left;
+    const top = widgetRect.top - stageRect.top;
+    const pos = { xFrac: maxLeft > 0 ? left / maxLeft : 0, yFrac: maxTop > 0 ? top / maxTop : 0 };
+    try { localStorage.setItem(PHASE_WIDGET_POS_KEY, JSON.stringify(pos)); } catch { /* private browsing etc. — position just won't persist */ }
+  }
+  phaseDragHandle.addEventListener("pointerup", endPhaseWidgetDrag);
+  phaseDragHandle.addEventListener("pointercancel", endPhaseWidgetDrag);
+
+  phaseDragHandle.addEventListener("dblclick", () => {
+    try { localStorage.removeItem(PHASE_WIDGET_POS_KEY); } catch { /* ignore */ }
+    applyPhaseWidgetPos(computeDefaultPhaseWidgetPos());
   });
 
   // ---------------------------------------------------------------------
@@ -444,6 +624,12 @@
     if (target) location.href = target.toString();
   });
 
+  const btnDemoVenusFinalPhase = document.getElementById("btnDemoVenusFinalPhase");
+  btnDemoVenusFinalPhase.addEventListener("click", () => {
+    const target = demoTargetUrl("venus-final-phase");
+    if (target) location.href = target.toString();
+  });
+
   btnShare.addEventListener("click", async () => {
     const url = new URL(location.href);
     url.searchParams.set("planets", Array.from(state.visible).join(","));
@@ -578,6 +764,7 @@
     helioSize = fitCanvas(helioCanvas);
     geoSize = fitCanvas(geoCanvas);
     phaseSize = fitCanvas(phaseCanvas);
+    repositionPhaseWidgetOnResize();
   }
   window.addEventListener("resize", resizeAll);
   // fonts/layout settle a tick after load
@@ -988,21 +1175,45 @@
         ? { x: earth.x + MOON.a * Math.cos(moonAngle), y: earth.y + MOON.a * Math.sin(moonAngle) }
         : positions[bodyKey];
       const { k, litOnRight } = computePhase(objPos, earth);
-      const waxing = prevPhaseK === null ? k >= 0.5 : k >= prevPhaseK;
+      // Whether there was a real previous sample to compare against — the
+      // `k >= 0.5` fallback below (used when there wasn't, e.g. the very
+      // first frame ever rendered) answers "which half of the cycle is
+      // this", not "is illumination rising or falling right now". Those
+      // only agree away from the extremes; right at a 0%/100% extreme
+      // (e.g. a phase-skip run started there) it can disagree with the
+      // real trend, so it must never be trusted as a phaseRun baseline —
+      // see the hadRealPrevK check below.
+      const hadRealPrevK = prevPhaseK !== null;
+      const waxing = hadRealPrevK ? k >= prevPhaseK : k >= 0.5;
       prevPhaseK = k;
       drawPhaseDisk(phaseCtx, phaseSize, k, litOnRight, bodyColor);
       phaseReadoutEl.textContent = `${Math.round(k * 100)}% lit · ${waxing ? "waxing" : "waning"}`;
 
       if (state.phaseRun.active) {
         if (state.phaseRun.baselineWaxing === null) {
-          state.phaseRun.baselineWaxing = waxing; // trend at the moment the button was clicked
+          // Only commit a baseline once `waxing` reflects a real
+          // two-sample trend (see hadRealPrevK above) — otherwise wait for
+          // the next frame rather than risk locking in a wrong baseline.
+          if (hadRealPrevK) state.phaseRun.baselineWaxing = waxing;
         } else if (waxing !== state.phaseRun.baselineWaxing) {
           // Trend just flipped — reached the extreme (full or new/minimum)
           // right after the one that was current when we started.
           state.phaseRun.active = false;
           state.playing = false;
+          // Roll back to whatever speed was active before this skip sped
+          // things up — see the "only speed up, never slow down" comment
+          // in the click handler above.
+          state.speed = state.phaseRun.speedBeforeRun;
           updatePlayPauseButton();
+          updateSpeedLabel();
           updatePhaseSkipAvailability();
+          // Bake the reached date into the URL and drop the one-shot
+          // ?autoskip= flag — otherwise a reload (or an address-bar copy,
+          // as opposed to "Copy link") would still show the original start
+          // date and immediately re-run the whole fast-forward instead of
+          // landing on this paused extreme.
+          dateInput.value = toISODateInput(state.simDate);
+          syncUrlParams({ date: toISODateInput(state.simDate), playing: "false", autoskip: null, speed: String(state.speed) });
         }
       }
     }

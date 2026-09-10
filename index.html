@@ -67,6 +67,7 @@
 
   <div class="control-group demos">
     <button id="btnDemoMarsRetrograde" class="btn" title="Load a preset view of Mars's 2024-25 retrograde loop">🔴 Mars retrograde demo</button>
+    <button id="btnDemoVenusFinalPhase" class="btn" title="Load a preset view that fast-forwards Venus to its next full/new phase extreme">♀ Venus final phase demo</button>
   </div>
 
   <div class="control-group share">
@@ -93,6 +94,7 @@
       <canvas id="geoCanvas"></canvas>
       <div id="phaseWidget" class="phase-widget">
         <div class="phase-widget-row">
+          <span id="phaseDragHandle" class="phase-drag-handle" title="Drag to move — double-click to reset">⠿</span>
           <label for="phaseBodySelect">Phase of</label>
           <select id="phaseBodySelect"></select>
           <button id="phaseSkipExtreme" class="btn zoom-btn phase-skip-btn" title="Fast-forward to the next full or new phase">⏭</button>

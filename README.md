@@ -15,10 +15,15 @@ the same simulated date/time, so you can directly compare "where things
 really are" against "what it would look like standing on Earth."
 
 **Live demo:** [sansword.github.io/sans_geometry](https://sansword.github.io/sans_geometry/)
-— or jump straight to the
-[Mars retrograde demo](https://sansword.github.io/sans_geometry/#demo),
-which loads a preset (`date=1433-10-10`, `zoom=0.85`, `speed=128`) showing
-Mars trace out its retrograde loop in the geocentric panel.
+— or jump straight to one of these presets:
+
+- [Mars retrograde demo](https://sansword.github.io/sans_geometry/#demo)
+  (`date=1433-10-10`, `zoom=0.85`, `speed=128`) — Mars traces out its
+  retrograde loop in the geocentric panel.
+- [Venus final phase demo](https://sansword.github.io/sans_geometry/#demo=venus-final-phase)
+  (`date=1435-04-16`, `phase=venus`, `autoskip=1`) — fast-forwards Venus's
+  phase widget from new (0% lit) to its next full phase (~100% lit),
+  auto-pausing once it gets there.
 
 Open `index.html` in a browser (or serve the folder with any static file
 server, e.g. `python3 -m http.server`) — there is no build step and no

@@ -334,6 +334,22 @@ canvas {
   gap: 5px;
 }
 
+/* Hidden below the desktop breakpoint (see the @media block further down):
+   the widget isn't absolutely positioned there, so there's nothing to drag. */
+.phase-drag-handle {
+  display: none;
+  color: var(--text-dim);
+  cursor: grab;
+  font-size: 0.85rem;
+  line-height: 1;
+  touch-action: none;
+  user-select: none;
+}
+
+.phase-drag-handle:active {
+  cursor: grabbing;
+}
+
 .phase-widget label {
   font-size: 0.68rem;
   color: var(--text-dim);
@@ -411,6 +427,10 @@ canvas {
     background: rgba(10, 12, 26, 0.85);
     -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
+  }
+
+  .phase-drag-handle {
+    display: inline-block;
   }
 
   .phase-widget canvas {
