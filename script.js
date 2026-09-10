@@ -443,16 +443,46 @@
     return 1 / Math.abs(1 / EARTH_PERIOD - 1 / body.period);
   }
 
-  function maybeSampleTrail(key, synodicPeriod, dx, dy) {
+  function maybeSampleTrail(key, synodicPeriod, dx, dy, sampleDate) {
     const threshold = synodicPeriod / 240; // days
     const last = lastSampleDate[key];
-    if (last === null || Math.abs(state.simDate - last) / MS_PER_DAY >= threshold) {
+    if (last === null || Math.abs(sampleDate - last) / MS_PER_DAY >= threshold) {
       const arr = trails[key];
       arr.push({ dx, dy });
       if (arr.length > TRAIL_MAX_POINTS + TRAIL_TRIM_SLACK) {
         arr.splice(0, arr.length - TRAIL_MAX_POINTS);
       }
-      lastSampleDate[key] = state.simDate;
+      lastSampleDate[key] = sampleDate;
+    }
+  }
+
+  // A single frame can advance the simulation by many days at once — a
+  // slow frame (e.g. the browser still busy right after page load) with a
+  // high `speed`, or just a high `speed` at a normal frame rate, since
+  // dtSeconds is only capped at 0.25s, not at some small number of
+  // simulated days. Sampling the trail only once per *render* frame in
+  // that case skips over the threshold entirely, so the trail gets one
+  // point far from the last instead of several close ones — a visible
+  // kink/facet where frames were slow, most noticeable right at page
+  // load. Sub-stepping here (independent of render, which is still only
+  // called once per frame) keeps trail resolution tied to simulated time
+  // instead of to however fast frames happened to render.
+  const TRAIL_SUBSTEP_CAP = 64;
+  function sampleTrailsAlong(fromDate, toDate) {
+    const visibleBodies = BODIES.filter(b => b.key !== "earth" && state.visible.has(b.key));
+    if (visibleBodies.length === 0) return;
+    const totalDays = Math.abs(toDate - fromDate) / MS_PER_DAY;
+    if (totalDays === 0) return;
+    const minThreshold = Math.min(...visibleBodies.map(b => synodicPeriodDays(b) / 240));
+    const steps = Math.min(TRAIL_SUBSTEP_CAP, Math.max(1, Math.ceil(totalDays / minThreshold)));
+    for (let i = 1; i <= steps; i++) {
+      const t = fromDate.getTime() + (toDate.getTime() - fromDate.getTime()) * (i / steps);
+      const sampleDate = new Date(t);
+      const earthPos = heliocentricPos(BODY_BY_KEY.earth, sampleDate);
+      visibleBodies.forEach(b => {
+        const p = heliocentricPos(b, sampleDate);
+        maybeSampleTrail(b.key, synodicPeriodDays(b), p.x - earthPos.x, p.y - earthPos.y, sampleDate);
+      });
     }
   }
 
@@ -621,7 +651,7 @@
 
       // sample + draw trails first (under the bodies)
       others.forEach(b => {
-        maybeSampleTrail(b.key, synodicPeriodDays(b), geoOf[b.key].dx, geoOf[b.key].dy);
+        maybeSampleTrail(b.key, synodicPeriodDays(b), geoOf[b.key].dx, geoOf[b.key].dy, state.simDate);
         drawTrail(ctx, cx, cy, trails[b.key], toPx, b.color, GEO_ROTATION_OFFSET);
       });
 
@@ -671,7 +701,9 @@
     lastTs = ts;
 
     if (state.playing) {
+      const prevSimDate = state.simDate;
       state.simDate = new Date(state.simDate.getTime() + state.speed * dtSeconds * MS_PER_DAY);
+      sampleTrailsAlong(prevSimDate, state.simDate);
     }
 
     if (state.run.target !== null && !state.run.completed) {
