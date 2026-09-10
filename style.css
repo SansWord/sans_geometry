@@ -367,4 +367,49 @@ canvas {
     min-height: 60vh;
   }
   .share { margin-left: 0; }
+
+  /* On mobile the page scrolls tall (panels stack), so the current-date
+     readout and the transport controls are pinned to the viewport edges
+     instead of scrolling away with the rest of the page. Both are taken
+     out of normal flow, so the body gets matching padding to keep page
+     content from starting underneath them. */
+  .date-display {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
+    margin-left: 0;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px 12px;
+    background: rgba(5, 6, 12, 0.95);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  .transport {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    justify-content: center;
+    gap: 8px 10px;
+    margin: 0;
+    background: rgba(5, 6, 12, 0.95);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    padding: 10px 12px;
+    border-top: 1px solid var(--panel-border);
+  }
+
+  body {
+    padding-top: 58px;
+    padding-bottom: 64px;
+  }
 }
