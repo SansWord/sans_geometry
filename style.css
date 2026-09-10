@@ -28,6 +28,13 @@ html, body {
   padding: 16px 20px 8px;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .topbar h1 {
   font-size: 1.25rem;
   margin: 0;
@@ -45,6 +52,7 @@ html, body {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  margin-left: auto;
 }
 
 .year-sec {
