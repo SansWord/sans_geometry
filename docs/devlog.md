@@ -14,7 +14,71 @@ Running log of what was built, when, and what we learned along the way.
 
 | Version | Summary |
 |---------|---------|
+| [v1.1.0](#v110--phase-widget-skip-to-extreme-control-and-mobile-layout-fixes-2026-09-10-1053) | Added a live phase widget (illuminated-fraction disk + skip-to-next-extreme control) to the geocentric panel, and fixed several mobile-layout issues along the way |
 | [v1.0.0](#v100--two-panel-simulator-ships-with-mars-retrograde-demo-2026-09-10-0250) | Renamed to `sans_geometry`, deployed to GitHub Pages, added a Mars-retrograde demo button + `#demo` hash link, a favicon, and an Open Graph preview image |
+
+## v1.1.0 — Phase widget, skip-to-extreme control, and mobile layout fixes (2026-09-10 10:53)
+
+**Review:** not yet
+
+**What was built:**
+- Added a phase widget to the geocentric panel: pick any planet or the
+  Moon and watch its illuminated fraction change live, computed from the
+  same heliocentric positions the sim already tracks (no new orbital data
+  needed) — motivated by discussing how Venus's phases historically argued
+  against a strict geocentric model.
+- Iterated the widget through several rounds of feedback: removed a
+  distance-based size-scaling animation that read as an unrelated "zoom"
+  rather than a phase cue; matched the lit disk's color to each body's own
+  orbit-dot color; fixed the readout text's variable width visibly
+  shifting the disk left/right; fixed a mobile-only overlap with the
+  circular canvas by giving the widget a responsive layout (a bar above
+  the canvas below the desktop breakpoint, a corner overlay above it).
+- Moved the geocentric zoom control to a horizontal bar pinned above the
+  transport controls on mobile too, so the circle and the zoom slider are
+  both visible together without scrolling.
+- Made the `?phase=` URL default to the first non-Sun/non-Earth body
+  listed in `?planets=`, falling back to Venus if there isn't one.
+- Added a "skip to next extreme" (`⏭`) button that fast-forwards playback
+  (trails accumulate along the way, nothing is skipped over) to the next
+  time the selected body is full or new, then auto-pauses; since full and
+  new alternate, repeated clicks naturally toggle between them. Disabled,
+  via an editable `PHASE_SKIP_DISABLED` list, for Saturn/Uranus/
+  Neptune/Pluto, whose minimum illumination always rounds to "100% lit."
+
+**Key technical learnings:**
+- `[insight]` Illuminated fraction is just the Sun-object-Earth angle
+  computed from vectors already in the sim (Sun at the origin, Earth and
+  the object's heliocentric positions) — works identically for the Moon
+  (using its existing geocentric offset from Earth) with no special-casing
+  needed.
+- `[gotcha]` A `@media` override placed *before* the unconditional rule it's
+  meant to override loses to it in the cascade at any width, even inside
+  the media query's own range — equal specificity means source order alone
+  breaks the tie. Produced a genuinely confusing symptom (an
+  absolutely-positioned box, but laid out and styled like the *other*
+  breakpoint) that took real investigation to trace back to plain rule
+  ordering rather than a logic bug.
+- `[insight]` For a superior planet, "full" occurs at *both* opposition and
+  solar conjunction (both are exact Sun-Earth-planet alignments), with the
+  two quadratures in between giving its minimum — so its illuminated
+  fraction has four extrema per synodic period, not two like an inferior
+  planet's or the Moon's (new ↔ full only). Mattered directly for sizing
+  the fast-forward speed and for reasoning through whether the "alternate
+  between extremes" behavior generalized correctly to outer planets.
+- `[gotcha]` Comparing a value to itself while the simulation is paused
+  (`k >= prevK`, when neither has actually changed) trivially reads as
+  "true" — harmless as a cosmetic quirk (the phase readout shows "waxing"
+  while idle regardless of the real trend) until it's fed into
+  trend-reversal detection logic that assumes the label reflects genuine
+  motion, which briefly looked like a real bug before tracing it back to
+  this.
+- `[note]` The browser automation's window-resize tool was unreliable this
+  session (silently kept the previous width across repeated calls);
+  closing the tab and opening a fresh one, or just taking a `computer`
+  screenshot (which seems to force a backgrounded tab to actually paint
+  and run `requestAnimationFrame`), got layout verification unstuck when
+  it happened.
 
 ## v1.0.0 — Two-panel simulator ships with Mars retrograde demo (2026-09-10 02:50)
 

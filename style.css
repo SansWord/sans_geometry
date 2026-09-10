@@ -271,6 +271,7 @@ canvas {
   position: relative;
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 10px;
@@ -299,6 +300,124 @@ canvas {
 
 .geo-tooltip .tip-planet {
   font-weight: 600;
+}
+
+/* Below the desktop breakpoint the geoCanvas can shrink well under 400px
+   (see --canvas-vh-cap), leaving too little empty corner outside the circle
+   to hold the widget without overlapping it — so on narrow layouts this
+   sits as its own full-width bar above the canvas+sidebar row instead
+   (`order: -1` + `flex-basis: 100%` forces it onto its own wrapped line;
+   .panel-body has `flex-wrap: wrap` for exactly this). Same idea as
+   .shortcuts-bar: never stacked on top of the circle, and the canvas is
+   never resized to make room. The @media override below switches it back
+   to a corner overlay once the canvas is wide enough to have real corner
+   space to spare — see the comment there. */
+.phase-widget {
+  order: -1;
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.phase-widget-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.phase-widget label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.phase-widget select {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-size: 0.72rem;
+  border-radius: 6px;
+  padding: 2px 3px;
+  max-width: 78px;
+}
+
+.phase-skip-btn {
+  width: 24px;
+  height: 24px;
+  font-size: 0.85rem;
+}
+
+.phase-skip-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.phase-widget canvas {
+  width: 36px;
+  height: 36px;
+  max-width: 36px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+}
+
+.phase-readout {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* Reserves room for the longest possible reading ("100% lit · waning")
+     so the select/disk before it never shift left/right as the percentage
+     and waxing/waning text change width every frame. */
+  min-width: 9.5em;
+}
+
+/* Placed after the unconditional rule above (not inside the earlier
+   canvas-sizing media block) so it actually wins the cascade at this width
+   — two rules of equal specificity where only one is conditional will
+   otherwise have the unconditional one win regardless of source order
+   relative to the media block, which was the bug here: this override used
+   to live in a `@media` block above the base rule, so the base rule (later
+   in the file, always active) clobbered it at any width. */
+@media (min-width: 781px) {
+  /* At this width the geoCanvas is comfortably large enough that its empty
+     corner (outside the circle, inside the square bounding box) has real
+     room to spare, so switch back to overlaying the widget there instead
+     of it taking up a bar above the canvas. */
+  .phase-widget {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 4;
+    order: 0;
+    flex: none;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    margin-bottom: 0;
+    padding: 8px;
+    gap: 5px;
+    border-radius: 10px;
+    background: rgba(10, 12, 26, 0.85);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+
+  .phase-widget canvas {
+    width: 48px;
+    height: 48px;
+    max-width: 48px;
+  }
 }
 
 .zoom-sidebar {
@@ -409,8 +528,51 @@ canvas {
     border-top: 1px solid var(--panel-border);
   }
 
+  /* Pinned as its own horizontal bar just above .transport, rather than
+     sitting in-flow next to the geoCanvas — on a phone-width screen a
+     vertical sidebar there pushed the slider below the fold, off-screen
+     until you scrolled. This way the circle and the zoom control are both
+     visible together without scrolling, matching how .transport/.date-
+     display are already pinned to the viewport edges below this
+     breakpoint. Order of the reused desktop elements is flipped to the
+     conventional left-to-right zoom-out -> slider -> zoom-in reading order. */
+  .zoom-sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 64px; /* stacks directly above .transport (assumed ~64px tall, same figure body's padding-bottom below already relies on) */
+    z-index: 29;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 0;
+    border: none;
+    border-top: 1px solid var(--panel-border);
+    background: rgba(5, 6, 12, 0.95);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+  }
+
+  .zoom-slider {
+    writing-mode: horizontal-tb;
+    direction: ltr;
+    width: auto;
+    height: 20px;
+    flex: 1 1 auto;
+    max-width: 220px;
+  }
+
+  #geoZoomOut { order: 1; }
+  #geoZoomSlider { order: 2; }
+  #geoZoomIn { order: 3; }
+  #geoZoomLabel { order: 4; }
+  #geoZoomReset { order: 5; }
+
   body {
     padding-top: 58px;
-    padding-bottom: 64px;
+    padding-bottom: 116px; /* .transport (~64px) + the zoom bar above it (~52px) */
   }
 }

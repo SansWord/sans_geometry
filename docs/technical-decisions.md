@@ -238,6 +238,129 @@ hours depending on magnitude. It's derived from `state.speed` alone and
 updates wherever `updateSpeedLabel()` already runs (speed +/-, reverse,
 starting a years-run), so it never needs its own separate update path.
 
+## Phase widget: illuminated fraction from vectors, not sky orientation
+
+Illuminated fraction is `k = (1 + cosα) / 2`, where `α` is the angle at the
+object between its direction to the Sun and its direction to Earth — the
+standard planetary phase angle. Computed directly from vectors:
+
+```
+toSun   = Sun - objectPos           (Sun is the origin, so this is just -objectPos)
+toEarth = earthPos - objectPos
+cosα    = dot(toSun, toEarth) / (|toSun| · |toEarth|)
+```
+
+This is the same formula for every body, including the Moon — its position
+is approximated as `earth + MOON.a·(cos, sin)(moonAngle)` (a small offset
+from Earth, using the existing geocentric moon angle already computed for
+the two orbit panels) rather than treating it as a special case. Which side
+of the disk is lit (so the crescent/gibbous bulge points the right way and
+swings smoothly as the body orbits) is decided the same way, by projecting
+the Sun direction onto the perpendicular of the Earth→object viewing axis.
+This is an internal, self-consistent convention, not tied to real sky
+orientation — the same spirit as `GEO_ROTATION_OFFSET` below, which is
+also an artificial-but-consistent convention rather than a claim about
+real orientation.
+
+## Phase disk is a fixed size, not distance-scaled
+
+An earlier version scaled the drawn disk's radius with 1/distance, so a
+body's rendered size grew as it approached Earth — motivated by the real
+Venus/Mercury size-phase correlation (a big thin crescent near Earth, a
+small near-full disk on the far side of the Sun) that's part of the
+historical argument against a strict geocentric model. In practice this
+read as an unrelated "zoom" rather than a phase cue, and was actively
+confusing for outer planets: their illuminated fraction barely moves
+(Jupiter's phase angle never exceeds ~11°) while their Earth-distance still
+swings substantially over a synodic period (Jupiter: ~4.2–6.2 AU), so the
+disk visibly resized while looking almost uniformly full the whole time —
+two different signals moving on two different rhythms, layered onto one
+icon. The disk is now drawn at a constant size; only its shading encodes
+phase.
+
+## Responsive placement: corner overlay vs. bar above the canvas
+
+Below the desktop breakpoint the geoCanvas can shrink well under 400px
+(see `--canvas-vh-cap` above), leaving too little of the square canvas's
+empty corner (outside its circular clip) to hold the widget without
+overlapping the circle. Above the breakpoint there's real corner space to
+spare. So `.phase-widget` is one DOM element repositioned entirely by CSS:
+an unconditional base rule lays it out as a full-width bar that
+`flex-wrap`s onto its own line above the canvas+zoom-sidebar row (same
+principle as `.shortcuts-bar` — never stacked on top of the circle, and
+the canvas itself is never resized to make room), and a
+`@media (min-width: 781px)` override switches it to `position: absolute`
+in the corner instead.
+
+**Gotcha this produced:** that override originally lived in an *earlier*
+`@media` block in the file (grouped with the unrelated pre-existing
+canvas-sizing rule), textually *before* the unconditional base rule. Since
+both rules have equal specificity, the later, unconditional rule won on
+every property they both set (`flex-direction`, `padding`, `background`,
+...) at any width — including desktop — while `position: absolute` from
+the media block still applied (the base rule never touched `position`).
+The result was a very confusing hybrid: an absolutely-positioned box
+overlapping the canvas, but laid out and styled like the mobile bar. The
+fix was purely reordering — moving the override to *after* the
+unconditional rule it's meant to override. General lesson: a media-query
+override must come after the rule it overrides in source order, even
+though the two rules "obviously" target different widths — CSS doesn't
+know that; it only sees two rules of equal specificity and picks the later
+one for whatever properties they share.
+
+## Fixed-width phase readout
+
+`.phase-readout`'s text ("13% lit · waxing") changes length every frame as
+the percentage and waxing/waning word change, and it sits in a row/column
+with other items centered as a group — so without a fixed width, the
+select and disk before it visibly shifted left/right as the trailing text
+grew and shrank. `min-width: 9.5em` (long enough for the longest reading,
+`"100% lit · waning"`) pins the row/column's total width constant, so nothing
+before it moves regardless of what the readout says.
+
+## "Skip to next extreme": trend-reversal detection, not a closed-form search
+
+The button fast-forwards live (reusing the exact same play loop and trail
+sampling as normal playback, just at a boosted `state.speed`) until the
+selected body's illuminated fraction next hits a local max (full) or local
+min (new, or "as dim as this body gets" for an outer planet), then
+auto-pauses. Detection: the render loop already computes a `waxing`
+boolean (this frame's `k` vs. the previous frame's) for the readout text.
+On the first frame after the click, that value is recorded as a baseline;
+on every later frame, if `waxing` no longer matches the baseline, the
+trend has flipped — we just passed the next extreme. Recording a baseline
+*instead of* just checking "is it decreasing now" matters because the
+button is pressed with the body already mid-trend one way or the other;
+comparing against that starting trend is what makes "next extreme" mean
+the *next* one chronologically; a plain "first frame going the other way"
+check would misfire near the very body/date the user started from — Venus
+sitting near its dimmest, clicked right before turning brighter, would
+otherwise still be treated as "already at an extreme" and stop instantly
+rather than travelling on to the actual next peak.
+
+Speed is auto-picked so the worst-case wait finishes in about 4 seconds
+regardless of body: `synodicPeriodDays(body) / 2 / 4`. The `/2` is a
+conservative upper bound, not exact — extrema alternate every *half*
+synodic period for Mercury, Venus, and the Moon (new ↔ full, since a
+strict inferior conjunction and a strict superior conjunction are the only
+two alignments), but every *quarter* synodic period for superior planets:
+both opposition (Δlongitude = 0°) *and* solar conjunction (Δlongitude =
+180°) put Sun, Earth, and the planet exactly colinear and therefore give
+`k = 1`, with the two quadratures in between (Δlongitude = 90° and 270°)
+each giving the planet's minimum. So a superior-planet skip typically
+finishes faster than its 4-second target rather than slower — an
+acceptable asymmetry rather than a bug, since the `/2` figure only needs
+to bound the wait, not predict it exactly.
+
+## Bodies excluded from "skip to next extreme"
+
+`PHASE_SKIP_DISABLED` (a plain `Set`, edited directly to change which
+bodies it covers) disables the button for Saturn, Uranus, Neptune, and
+Pluto: their minimum illumination, at quadrature, is 99.7–99.98% — always
+rounds to "100% lit" in the readout, so there's no visibly different "new"
+extreme to fast-forward to. Mars (min ~88%) and Jupiter (min ~99%) stay
+enabled since their dip is actually visible in the rounded readout.
+
 ## No build step, no dependencies
 
 Plain `index.html` + `style.css` + `script.js`, rendered with a single

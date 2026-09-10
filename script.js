@@ -64,6 +64,19 @@
   const BODY_BY_KEY = Object.fromEntries(BODIES.map(b => [b.key, b]));
   const ALL_KEYS = BODIES.map(b => b.key);
 
+  // Bodies offered in the phase widget: everything with a real phase cycle
+  // as seen from Earth. Excludes Earth itself (no "phase of Earth as seen
+  // from Earth") and the Sun (not illuminated by itself).
+  const PHASE_BODIES = BODIES.filter(b => b.key !== "earth").concat([MOON]);
+
+  // Bodies for which the "skip to next full/new" button is disabled: their
+  // minimum illumination (at quadrature) still rounds to "100% lit" in the
+  // readout, so there's no visibly different "new" extreme to fast-forward
+  // to. Mars (min ~88%) and Jupiter (min ~99%) stay enabled since their dip
+  // is actually visible; Saturn/Uranus/Neptune/Pluto (min ~99.7-99.98%)
+  // don't. Edit this list directly if that judgment call should change.
+  const PHASE_SKIP_DISABLED = new Set(["saturn", "uranus", "neptune", "pluto"]);
+
   function rad(deg) { return (deg * Math.PI) / 180; }
 
   function heliocentricPos(body, simDate) {
@@ -106,11 +119,18 @@
     geoZoom: 1,        // manual zoom multiplier for the geocentric panel
     run: { target: null, startDate: null, completed: false }, // "Run for N years"
     trailsSince: null, // simDate as of the last trail clear; set below once simDate is finalized
+    phaseBody: "venus", // placeholder; finalized below once ?planets= is parsed
+    phaseRun: { active: false, baselineWaxing: null }, // "skip to next full/new" fast-forward
   };
 
+  // Order the ?planets= list was given in (not state.visible — a Set, whose
+  // insertion order matters only for this, not for anything else) so the
+  // phase-widget default below can pick "the first body you asked to see".
+  let requestedPlanetOrder = null;
   if (params.has("planets")) {
     const requested = params.get("planets").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-    state.visible = new Set(requested.filter(k => ALL_KEYS.includes(k) || k === "moon" || k === "sun"));
+    requestedPlanetOrder = requested.filter(k => ALL_KEYS.includes(k) || k === "moon" || k === "sun");
+    state.visible = new Set(requestedPlanetOrder);
   }
   if (params.has("date")) {
     const d = new Date(params.get("date") + (params.get("date").length <= 10 ? "T00:00:00Z" : ""));
@@ -126,6 +146,16 @@
   if (params.has("zoom")) {
     const z = parseFloat(params.get("zoom"));
     if (!isNaN(z) && z > 0) state.geoZoom = Math.min(3, Math.max(0.4, z));
+  }
+  // Phase widget default: the first ?planets= body that isn't the Sun or
+  // Earth (already filtered to known keys above, so anything left after
+  // excluding those two is a valid PHASE_BODIES entry). Falls back to Venus
+  // when ?planets= wasn't given, or only requested Sun and/or Earth. An
+  // explicit ?phase= always wins over this default.
+  state.phaseBody = (requestedPlanetOrder || []).find(k => k !== "sun" && k !== "earth") || "venus";
+  if (params.has("phase")) {
+    const p = params.get("phase").trim().toLowerCase();
+    if (PHASE_BODIES.some(b => b.key === p)) state.phaseBody = p;
   }
   // "years" is handled after the run-controls / clearAllTrails machinery
   // is set up below, since starting a run needs both of those.
@@ -172,6 +202,79 @@
       state.visible.delete(key);
     }
     syncUrlParams({ planets: Array.from(state.visible).join(",") });
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase widget: body picker
+  // ---------------------------------------------------------------------
+  const phaseBodySelect = document.getElementById("phaseBodySelect");
+  const phaseReadoutEl = document.getElementById("phaseReadout");
+  PHASE_BODIES.forEach(b => {
+    const opt = document.createElement("option");
+    opt.value = b.key;
+    opt.textContent = b.name;
+    phaseBodySelect.appendChild(opt);
+  });
+  phaseBodySelect.value = state.phaseBody;
+
+  const phaseSkipBtn = document.getElementById("phaseSkipExtreme");
+  const PHASE_SKIP_TARGET_WALL_SECONDS = 4; // aim to cover the worst case (half a synodic period) in about this long
+
+  // Reflects both possible reasons the button might be unusable right now:
+  // the selected body is in PHASE_SKIP_DISABLED (permanent, until the body
+  // changes), or a search is already in flight (temporary, until it lands).
+  function updatePhaseSkipAvailability() {
+    const body = PHASE_BODIES.find(b => b.key === state.phaseBody);
+    const unsupported = PHASE_SKIP_DISABLED.has(state.phaseBody);
+    phaseSkipBtn.disabled = unsupported || state.phaseRun.active;
+    phaseSkipBtn.title = unsupported
+      ? `${body ? body.name : "This body"}'s phase barely changes — fast-forward isn't useful here`
+      : `Fast-forward to the next time ${body ? body.name : "this body"} is full or new`;
+  }
+  updatePhaseSkipAvailability();
+
+  // Illuminated fraction from the previous frame, used to tell waxing from
+  // waning by its trend rather than by sign conventions. Reset whenever the
+  // selected body changes so the new body doesn't inherit the old one's
+  // trend for one frame.
+  let prevPhaseK = null;
+  phaseBodySelect.addEventListener("change", () => {
+    state.phaseBody = phaseBodySelect.value;
+    prevPhaseK = null;
+    // A body switch invalidates whatever "next extreme" search was in
+    // flight for the old body — the trend being watched no longer means
+    // anything.
+    state.phaseRun.active = false;
+    updatePhaseSkipAvailability();
+    syncUrlParams({ phase: state.phaseBody });
+  });
+
+  // "Skip to next extreme": fast-forwards (reusing the same trail-sampling/
+  // render loop as normal playback, just at a boosted speed — trails
+  // accumulate along the way rather than being skipped over) until the
+  // selected body's illuminated fraction next hits a local max (full) or
+  // local min (new, for Mercury/Venus/Moon — or just "as dim as this body
+  // ever gets" for an outer planet, which never truly reaches 0%), then
+  // auto-pauses. Since full and new alternate, repeated clicks naturally
+  // toggle between them.
+  //
+  // Detected in render() below by recording the current waxing/waning
+  // trend on the first frame after the click, then watching for it to
+  // flip. Waiting for an actual flip (not just "first frame going the
+  // other way") matters because the trend at click time already IS one
+  // direction or the other — recording it as the baseline is what makes
+  // "next extreme" mean the *next* one, not an instant no-op stop if we
+  // happen to click right after passing one.
+  phaseSkipBtn.addEventListener("click", () => {
+    const body = PHASE_BODIES.find(b => b.key === state.phaseBody);
+    const worstCaseDays = synodicPeriodDays(body) / 2; // extremes alternate every half synodic period
+    state.speed = Math.min(4096, Math.max(1 / 64, worstCaseDays / PHASE_SKIP_TARGET_WALL_SECONDS));
+    updateSpeedLabel();
+    state.playing = true;
+    updatePlayPauseButton();
+    state.phaseRun = { active: true, baselineWaxing: null };
+    updatePhaseSkipAvailability();
+    syncUrlParams({ speed: String(state.speed) });
   });
 
   // ---------------------------------------------------------------------
@@ -406,8 +509,10 @@
   // ---------------------------------------------------------------------
   const helioCanvas = document.getElementById("helioCanvas");
   const geoCanvas = document.getElementById("geoCanvas");
+  const phaseCanvas = document.getElementById("phaseCanvas");
   const helioCtx = helioCanvas.getContext("2d");
   const geoCtx = geoCanvas.getContext("2d");
+  const phaseCtx = phaseCanvas.getContext("2d");
 
   function fitCanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
@@ -467,11 +572,12 @@
     }
   }
 
-  let helioSize = 0, geoSize = 0;
+  let helioSize = 0, geoSize = 0, phaseSize = 0;
   function resizeAll() {
     updateCanvasVhCap();
     helioSize = fitCanvas(helioCanvas);
     geoSize = fitCanvas(geoCanvas);
+    phaseSize = fitCanvas(phaseCanvas);
   }
   window.addEventListener("resize", resizeAll);
   // fonts/layout settle a tick after load
@@ -690,6 +796,79 @@
   const MOON_PIXEL_RADIUS_HELIO = 13;
   const MOON_PIXEL_RADIUS_GEO = 26;
 
+  // ---------------------------------------------------------------------
+  // Phase widget math. Uses the law-of-cosines-equivalent vector form of
+  // the standard planetary phase angle (Sun-Object-Earth, vertex at the
+  // object) — this is the same quantity that made Venus's phases the
+  // historical argument against a strict geocentric model. The disk is
+  // drawn at a fixed size (distance also affects apparent size in reality,
+  // but mixing that into the same icon reads as an unrelated "zoom" rather
+  // than the phase cycle, especially for outer planets where distance
+  // swings with the synodic period while illumination barely moves).
+  // ---------------------------------------------------------------------
+  function computePhase(objPos, earthPos) {
+    const toSun = { x: -objPos.x, y: -objPos.y };            // object -> Sun
+    const toEarth = { x: earthPos.x - objPos.x, y: earthPos.y - objPos.y }; // object -> Earth
+    const magSun = Math.hypot(toSun.x, toSun.y);
+    const magEarth = Math.hypot(toEarth.x, toEarth.y);
+    const cosAlpha = (magSun && magEarth)
+      ? Math.max(-1, Math.min(1, (toSun.x * toEarth.x + toSun.y * toEarth.y) / (magSun * magEarth)))
+      : 1;
+    const k = (1 + cosAlpha) / 2; // illuminated fraction, 0=new, 1=full
+
+    // Which side of the disk (as seen looking from Earth toward the
+    // object) faces the Sun, so the crescent/gibbous bulge points the
+    // right way and swings smoothly as the body orbits. This is an
+    // internal, self-consistent convention (not tied to real sky
+    // orientation) — the panels themselves already use a similar artificial
+    // convention for GEO_ROTATION_OFFSET.
+    const view = { x: objPos.x - earthPos.x, y: objPos.y - earthPos.y }; // Earth -> object
+    const rightPerp = { x: -view.y, y: view.x };
+    const litOnRight = (toSun.x * rightPerp.x + toSun.y * rightPerp.y) >= 0;
+
+    return { k, litOnRight };
+  }
+
+  const PHASE_DARK = "#12162c";
+
+  function drawPhaseDisk(ctx, size, k, litOnRight, litColor) {
+    ctx.clearRect(0, 0, size, size);
+    const cx = size / 2, cy = size / 2;
+    const r = size / 2 - 3;
+    const kk = Math.max(0, Math.min(1, k));
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = PHASE_DARK;
+    ctx.fill();
+
+    if (kk <= 0.001) return; // new: nothing more to draw
+    if (kk >= 0.999) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = litColor;
+      ctx.fill();
+      return;
+    }
+
+    // Classic phase-disk construction: a half-circle arc (the fully-lit
+    // limb) joined to a half-ellipse (the terminator) back to the start —
+    // the ellipse bulges the same side as the arc for a crescent (a thin
+    // lune next to the limb) or the opposite side for a gibbous (extending
+    // light past the center line into the far half).
+    const rx = r * Math.abs(1 - 2 * kk);
+    const gibbous = kk > 0.5;
+    const ellipseAnticlockwise = gibbous ? !litOnRight : litOnRight;
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.arc(cx, cy, r, -Math.PI / 2, Math.PI / 2, !litOnRight);
+    ctx.ellipse(cx, cy, rx, r, 0, Math.PI / 2, -Math.PI / 2, ellipseAnticlockwise);
+    ctx.closePath();
+    ctx.fillStyle = litColor;
+    ctx.fill();
+  }
+
   function render(positions) {
     // positions: map key -> {x,y} heliocentric AU
     const earth = positions.earth;
@@ -798,6 +977,33 @@
         drawOrbitRing(ctx, cx, cy, MOON_PIXEL_RADIUS_GEO, MOON.color);
         const m = geoXY(cx, cy, MOON_PIXEL_RADIUS_GEO, moonAngle);
         drawBody(ctx, m.x, m.y, 3, MOON.color, "Moon");
+      }
+    }
+
+    // ---------------- Phase widget ----------------
+    {
+      const bodyKey = state.phaseBody;
+      const bodyColor = bodyKey === "moon" ? MOON.color : BODY_BY_KEY[bodyKey].color;
+      const objPos = bodyKey === "moon"
+        ? { x: earth.x + MOON.a * Math.cos(moonAngle), y: earth.y + MOON.a * Math.sin(moonAngle) }
+        : positions[bodyKey];
+      const { k, litOnRight } = computePhase(objPos, earth);
+      const waxing = prevPhaseK === null ? k >= 0.5 : k >= prevPhaseK;
+      prevPhaseK = k;
+      drawPhaseDisk(phaseCtx, phaseSize, k, litOnRight, bodyColor);
+      phaseReadoutEl.textContent = `${Math.round(k * 100)}% lit · ${waxing ? "waxing" : "waning"}`;
+
+      if (state.phaseRun.active) {
+        if (state.phaseRun.baselineWaxing === null) {
+          state.phaseRun.baselineWaxing = waxing; // trend at the moment the button was clicked
+        } else if (waxing !== state.phaseRun.baselineWaxing) {
+          // Trend just flipped — reached the extreme (full or new/minimum)
+          // right after the one that was current when we started.
+          state.phaseRun.active = false;
+          state.playing = false;
+          updatePlayPauseButton();
+          updatePhaseSkipAvailability();
+        }
       }
     }
   }

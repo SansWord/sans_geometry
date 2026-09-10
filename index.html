@@ -91,6 +91,15 @@
     <h2>Geocentric <span class="sub">(Earth at center)</span></h2>
     <div class="panel-body">
       <canvas id="geoCanvas"></canvas>
+      <div id="phaseWidget" class="phase-widget">
+        <div class="phase-widget-row">
+          <label for="phaseBodySelect">Phase of</label>
+          <select id="phaseBodySelect"></select>
+          <button id="phaseSkipExtreme" class="btn zoom-btn phase-skip-btn" title="Fast-forward to the next full or new phase">⏭</button>
+        </div>
+        <canvas id="phaseCanvas"></canvas>
+        <div id="phaseReadout" class="phase-readout"></div>
+      </div>
       <div id="geoTooltip" class="geo-tooltip" hidden></div>
       <div class="zoom-sidebar" id="geoZoomSidebar">
         <button id="geoZoomIn" class="btn zoom-btn" title="Zoom in">+</button>

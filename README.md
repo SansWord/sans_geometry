@@ -54,9 +54,27 @@ external dependencies.
   and auto-stops exactly N simulated years later — a quick way to see
   everything a human could observe accumulate over a lifetime. Leave it
   alone and the simulation just keeps running indefinitely, as always.
-- The current view (selected bodies, date, speed, playing state, zoom) is
-  reflected live in the URL's query string, and a "Copy link" button
-  copies a fully shareable URL.
+- A **phase widget** alongside the geocentric panel (an overlay in its
+  top-left corner on desktop; its own bar above the canvas on narrow/mobile
+  layouts, so it never overlaps the circle): pick any planet or the Moon
+  and watch its illuminated fraction change live as the simulation runs.
+  This is the same Sun-Object-Earth phase-angle geometry behind
+  [Galileo's observation of Venus's phases](https://en.wikipedia.org/wiki/Phases_of_Venus),
+  historically one of the pieces of evidence against a strict geocentric
+  model (which can't produce a full or gibbous Venus) — Venus swings
+  through its whole phase range as it orbits, while an outer planet like
+  Jupiter stays close to full, since Earth can never get far enough
+  "around" it to see much of its night side. A **⏭ button** next to the
+  body picker fast-forwards (auto-picking a speed so the wait is a few
+  seconds regardless of body) to the next time its phase peaks or bottoms
+  out, then auto-pauses — trails accumulate along the way rather than
+  being skipped over. Since full and new alternate, repeated clicks
+  naturally toggle between them (for an outer planet, which never
+  reaches true "new," between its peak and whatever its dimmest point
+  is — e.g. Mars alternates between full and ~88% lit).
+- The current view (selected bodies, date, speed, playing state, zoom,
+  phase-widget body) is reflected live in the URL's query string, and a
+  "Copy link" button copies a fully shareable URL.
 
 ## Query parameters
 
@@ -76,6 +94,7 @@ playing at 30 simulated days per second.
 | `speed`   | simulated days per real second (negative = reverse) | `128`    |
 | `playing` | `true` / `false`                                    | `true`   |
 | `zoom`    | geocentric panel manual zoom, `0.4`–`3`              | `1`      |
+| `phase`   | which body the phase widget shows: `mercury,venus,mars,jupiter,saturn,uranus,neptune,pluto,moon` | first non-Sun, non-Earth body in `planets` (in the order given); `venus` if `planets` wasn't given, or requested only Sun and/or Earth |
 | `years`   | clears trails and runs forward exactly this many simulated years from `date`, then auto-stops (speed is auto-picked unless `speed` is also given) | unset — runs indefinitely |
 
 ## Accuracy
