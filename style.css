@@ -19,6 +19,17 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+/* Reserve the vertical scrollbar's width permanently, whether or not a
+   scrollbar is actually showing. Without this, script.js's canvas-height
+   cap (see --canvas-vh-cap) and the scrollbar it's meant to avoid can feed
+   back into each other: shrinking the canvas removes the scrollbar, which
+   widens the viewport, which re-wraps .controls onto fewer rows, which
+   shortens the chrome above the canvas, which grows the cap back, which
+   reintroduces the scrollbar — oscillating instead of settling. */
+html {
+  scrollbar-gutter: stable;
+}
+
 .topbar {
   display: flex;
   align-items: baseline;
@@ -48,10 +59,9 @@ html, body {
   color: var(--accent);
   font-weight: 600;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
   margin-left: auto;
 }
 
@@ -205,7 +215,6 @@ label { font-size: 0.85rem; color: var(--text-dim); }
   display: flex;
   gap: 1px;
   background: var(--panel-border);
-  min-height: 60vh;
 }
 
 .panel {
@@ -238,6 +247,23 @@ canvas {
   background: radial-gradient(circle at 50% 50%, #0d1126 0%, #05060c 75%);
   border-radius: 50%;
   border: 1px solid var(--panel-border);
+}
+
+/* Above the mobile breakpoint, the two orbit panels sit side by side, so
+   window WIDTH alone (not height) drives canvas size up toward the 640px
+   cap — on a wide-but-short desktop window that cap alone still overflows
+   the viewport vertically. --canvas-vh-cap is computed in script.js from
+   the actual measured space around the canvas (the surrounding chrome's
+   height varies with how many rows the controls wrap to, so a fixed calc()
+   offset here can't track it precisely) and bounds canvas size by the real
+   available viewport height, so the page always fits without a vertical
+   scrollbar on desktop. Left unbounded below the breakpoint — the stage
+   stacks to one column there, and vertical scrolling on mobile is
+   expected/acceptable. */
+@media (min-width: 781px) {
+  canvas {
+    max-width: min(640px, var(--canvas-vh-cap, 640px));
+  }
 }
 
 .panel-body {
@@ -301,7 +327,11 @@ canvas {
   writing-mode: vertical-lr;
   direction: rtl;
   width: 20px;
-  height: 130px;
+  /* Shrunk by script.js on very short desktop windows once the canvas
+     itself has hit its own minimum — see --canvas-vh-cap above — since
+     the sidebar's own fixed height would otherwise force a vertical
+     scrollbar back in even with a tiny canvas. */
+  height: var(--zoom-slider-h, 130px);
   accent-color: var(--accent);
   cursor: pointer;
 }
@@ -327,6 +357,14 @@ canvas {
 }
 
 @media (max-width: 780px) {
-  .stage { flex-direction: column; }
+  .stage {
+    flex-direction: column;
+    /* The two panels stack into one column here, so a min-height keeps a
+       lone panel from looking squashed. Desktop instead relies on
+       script.js's --canvas-vh-cap to size the canvas to the actual
+       available space — this min-height would fight that above the
+       breakpoint and force a vertical scrollbar back in on short windows. */
+    min-height: 60vh;
+  }
   .share { margin-left: 0; }
 }

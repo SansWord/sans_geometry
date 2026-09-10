@@ -70,45 +70,67 @@ advances, so the scale — and the whole picture — is stable while playing.
 A manual zoom slider (0.4×–3×) was added afterward specifically so users
 can still get a closer look without reintroducing that instability.
 
-## Trail sampling: synodic period, not sidereal period
+## Trail sampling: two different "loop" periods, not one
 
 Trails are geocentric-only (the heliocentric panel already draws static
-orbit rings, since those orbits *are* circles by construction). Points are
-sampled at a rate proportional to how fast the geocentric loop actually
-completes, using `synodicPeriod / 240` days as the sampling interval
-(≈240 points per loop, giving a smooth curve regardless of playback
-speed).
+orbit rings, since those orbits *are* circles by construction). There are
+actually two different periodic phenomena riding on the same trail, and
+the code has to size itself off *both*:
 
-The first implementation sampled based on each body's own **sidereal**
-period instead. That's fine for Mercury–Saturn (sidereal and synodic
-periods are the same order of magnitude), but Uranus (84 years), Neptune
-(165 years) and Pluto (248 years) have sidereal periods vastly longer than
-their ~1-year synodic (geocentric loop) period — so the old code sampled
-once every 100–380 simulated days for a loop that closes in about a year,
-producing visibly jagged, faceted trails for exactly those three bodies.
-Switching the sampling basis to the synodic period
-(`1 / |1/earthPeriod - 1/bodyPeriod|`) fixed it directly.
+- The small retrograde wiggle closes once per **synodic period** (how
+  often Earth laps the body) — `1 / |1/earthPeriod - 1/bodyPeriod|`.
+- The **big loop that sweeps all the way around Earth** — what "the trail
+  makes a full circle" actually means visually — is governed by whichever
+  of the two bodies' own sidereal periods is longer:
+  `geoLoopPeriod = max(earthPeriod, bodyPeriod)`. For outer planets
+  (Mars–Pluto) that's the planet's own orbit; for Mercury/Venus, Earth's
+  faster orbit dominates instead, so their big loop closes once a year
+  regardless of their own (faster) period.
 
-**A "full round" for an outer planet is not the same as a full geocentric
-loop.** The retrograde loop closes once per synodic period (~1 year), but
-the planet's *mean* geocentric direction only sweeps 360° once per its own
-sidereal period — decades to centuries for Uranus/Neptune/Pluto. What you
-see for those bodies is correctly a chain of small loops strung along a
-slowly-drifting arc, not a closing circle; only the Sun's geocentric path
-is a closed circle every year. The trail history depth (below) was sized
-to make that chain-of-loops pattern easy to actually see.
+These two periods are the *same order of magnitude* for Mercury–Saturn,
+but diverge enormously for the far outer planets — Pluto's synodic period
+is barely more than a year (Earth laps it constantly), while its sidereal
+period, and therefore its geocentric big loop, is **~248 years**. An
+earlier version sized sampling and trail-history depth off the synodic
+period alone, which produced nicely smooth small wiggles but meant the big
+loop could never complete for Saturn/Uranus/Neptune/Pluto no matter how
+long the simulation ran — there just wasn't enough history retained to
+cover it. Sample spacing is now
+`min(geoLoopPeriod / 240, synodicPeriod / 8)` days: fine enough to resolve
+the big loop in ~240 steps, but never coarser than ~8 steps per small
+wiggle (otherwise, since the big loop is many decades long for the
+farthest planets, the wiggles would be badly under-sampled into a jagged
+mess).
+
+**Testing that every planet's trail can fully surround Earth:** the
+slowest body, Pluto, needs its full ~248-year geocentric loop to actually
+close — run the simulation for **about 270 years** (a little past 248, so
+the loop visibly closes and overlaps rather than just barely reaching
+back around) to confirm every planet's trail, not just the faster inner
+ones, forms a closed ring around Earth. At the default speed a run that
+long takes a while in real time, so bump the speed (or use "Run for N
+years") rather than waiting at 1×.
 
 ## Trail buffer size and trimming strategy
 
-Each body keeps up to 3600 sampled points (~15 synodic loops' worth,
-since sampling is normalized to ~240 points/loop for every body
-regardless of period). At that size, the array is trimmed in batches
-(only once it overshoots the cap by 300, via a single `splice`) rather
-than shifting one element off on every single push — an O(1)-amortized
-approach instead of paying an O(n) `shift()` per sample. In practice this
-is cheap either way (worst case is a few hundred pushes per second, gated
-by the animation frame rate, not by simulation speed), but the batching
-avoids paying that cost needlessly often now that the buffer is larger.
+Each body keeps up to 4500 sampled points — enough to hold at least two
+full geocentric loops (see above) for every body, including Pluto's
+~248-year loop at its ~46-day sample spacing. At that size, the array is
+trimmed in batches (only once it overshoots the cap by 400, via a single
+`splice`) rather than shifting one element off on every single push — an
+O(1)-amortized approach instead of paying an O(n) `shift()` per sample. In
+practice this is cheap either way (worst case is a few hundred pushes per
+second, gated by the animation frame rate, not by simulation speed), but
+the batching avoids paying that cost needlessly often now that the buffer
+is larger.
+
+Trails always start empty — nothing is pre-computed or backfilled on page
+load or when a planet is switched on. An earlier version seeded ~2 loops
+of *past* history (computed directly from the orbital formulas) so a
+fresh load showed a full loop immediately; this was removed because it
+made the page look like trails were "already there" before the simulation
+had actually run any time, which was surprising. Trails now only ever
+reflect time the simulation has actually played through.
 
 ## Month ring: anchoring and mirroring the geocentric frame
 

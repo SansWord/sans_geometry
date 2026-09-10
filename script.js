@@ -105,6 +105,7 @@
     playing: true,
     geoZoom: 1,        // manual zoom multiplier for the geocentric panel
     run: { target: null, startDate: null, completed: false }, // "Run for N years"
+    trailsSince: null, // simDate as of the last trail clear; set below once simDate is finalized
   };
 
   if (params.has("planets")) {
@@ -134,6 +135,7 @@
     const y = parseFloat(params.get("years"));
     if (!isNaN(y) && y > 0) requestedYearsOnLoad = y;
   }
+  state.trailsSince = new Date(state.simDate.getTime());
 
   // ---------------------------------------------------------------------
   // Controls: build planet checkboxes
@@ -186,6 +188,7 @@
   const btnShare = document.getElementById("btnShare");
   const dateLabel = document.getElementById("dateLabel");
   const yearSecLabel = document.getElementById("yearSecLabel");
+  const trailAgeLabel = document.getElementById("trailAgeLabel");
 
   function toISODateInput(d) {
     return d.toISOString().slice(0, 10);
@@ -210,9 +213,24 @@
   updatePlayPauseButton();
   updateSpeedLabel();
 
+  // How much simulated time has accumulated since trails were last cleared
+  // (not since the page loaded) — e.g. to know when you've run long enough
+  // for the slowest planet's trail to close (see docs/technical-decisions.md,
+  // "Trail sampling": Pluto's geocentric loop needs ~248 simulated years).
+  function formatYears(y) {
+    return y < 10 ? `${y.toFixed(1)}y` : `${Math.round(y).toLocaleString()}y`;
+  }
+  function updateTrailAgeLabel() {
+    const elapsedYears = Math.abs((state.simDate - state.trailsSince) / MS_PER_DAY / DAYS_PER_YEAR);
+    trailAgeLabel.textContent = `Trail age: ${formatYears(elapsedYears)}`;
+  }
+  updateTrailAgeLabel();
+
   function clearAllTrails() {
     for (const k of Object.keys(trails)) trails[k] = [];
     for (const k of Object.keys(lastSampleDate)) lastSampleDate[k] = null;
+    state.trailsSince = new Date(state.simDate.getTime());
+    updateTrailAgeLabel();
   }
 
   btnPlayPause.addEventListener("click", () => {
@@ -400,8 +418,58 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return cssSize;
   }
+
+  // Above the mobile breakpoint, the two orbit panels sit side by side, so
+  // canvas size (capped at 640px in CSS) is driven by available WIDTH
+  // alone — on a wide-but-short desktop window that cap can still be
+  // taller than the remaining viewport height, forcing an unwanted
+  // vertical scrollbar. Publish a smaller cap as a CSS custom property so
+  // `canvas { max-width: min(640px, var(--canvas-vh-cap)) }` (style.css)
+  // can additionally bound canvas size by height. Skipped below the
+  // breakpoint, where the stage stacks into one column and a vertical
+  // scrollbar is expected/acceptable.
+  //
+  // How much chrome surrounds the canvas isn't just header+controls+footer
+  // height — it also depends on things like how many lines the shortcuts
+  // bar or footer note wrap to at this width, and the geocentric panel's
+  // zoom sidebar has its own fixed minimum height that can force the row
+  // taller than the canvas alone would. Rather than re-deriving all of
+  // that algebraically (and it drifting out of sync as the page changes),
+  // just measure the actual rendered overflow and shrink the cap until it
+  // goes away, capped at a few iterations since each one forces a reflow.
+  // Once the canvas alone hits its own floor and overflow still remains
+  // (a genuinely short/narrow desktop window), also shrink the zoom
+  // sidebar's slider (--zoom-slider-h in style.css) — its fixed height
+  // would otherwise pin a scrollbar in place no matter how small the
+  // canvas gets.
+  const DESKTOP_BREAKPOINT_PX = 781; // matches the CSS media query
+  const footerNote = document.querySelector(".note");
+  function updateCanvasVhCap() {
+    const root = document.documentElement;
+    if (window.innerWidth < DESKTOP_BREAKPOINT_PX) {
+      root.style.removeProperty("--canvas-vh-cap");
+      root.style.removeProperty("--zoom-slider-h");
+      return;
+    }
+    let cap = 640;
+    let sliderH = 130;
+    root.style.setProperty("--zoom-slider-h", `${sliderH}px`);
+    for (let i = 0; i < 8; i++) {
+      root.style.setProperty("--canvas-vh-cap", `${cap}px`);
+      const overflow = root.scrollHeight - window.innerHeight;
+      if (overflow <= 0) break;
+      if (cap > 120) {
+        cap = Math.max(120, cap - overflow - 2);
+      } else {
+        sliderH = Math.max(40, sliderH - overflow - 2);
+        root.style.setProperty("--zoom-slider-h", `${sliderH}px`);
+      }
+    }
+  }
+
   let helioSize = 0, geoSize = 0;
   function resizeAll() {
+    updateCanvasVhCap();
     helioSize = fitCanvas(helioCanvas);
     geoSize = fitCanvas(geoCanvas);
   }
@@ -409,10 +477,25 @@
   // fonts/layout settle a tick after load
   requestAnimationFrame(resizeAll);
 
+  // The chrome around the canvases (header/controls/footer) can change
+  // height without a `resize` event ever firing — e.g. controls re-wrapping
+  // once web fonts finish loading, or the run-status text appearing —
+  // which would leave --canvas-vh-cap computed against a stale layout.
+  // Watching the chrome elements directly (rather than guessing how long
+  // "settling" takes) keeps it correct regardless of load timing.
+  if (window.ResizeObserver) {
+    const chromeObserver = new ResizeObserver(() => resizeAll());
+    [document.querySelector(".topbar"), document.querySelector(".controls"), footerNote]
+      .forEach(el => { if (el) chromeObserver.observe(el); });
+  }
+
   // ---------------------------------------------------------------------
-  // Trails (geocentric only) — sampled per-body at a rate proportional to
-  // that body's SYNODIC period (its loop period as seen from Earth), so
-  // loop shapes look similarly detailed regardless of simulation speed.
+  // Trails (geocentric only) — sampled per-body at a rate that resolves
+  // both the small synodic wiggle and the (often much longer) big loop
+  // around Earth, so loop shapes look similarly detailed regardless of
+  // simulation speed. See trailSampleThresholdDays() and
+  // docs/technical-decisions.md ("Trail sampling") for why two different
+  // periods are involved.
   // ---------------------------------------------------------------------
   const trails = {};
   const lastSampleDate = {};
@@ -429,28 +512,52 @@
     yearsInput.value = requestedYearsOnLoad;
     startYearsRun(requestedYearsOnLoad, { autoSpeed: !speedWasExplicit });
   }
-  // ~15 synodic loops of history per body (240 samples/loop). Trimmed in
-  // batches (not one-by-one) so the O(n) array shift cost is amortized —
-  // at 3000 points x ~9 bodies x 2 numbers/point this is well under 1MB
-  // and stroking that many segments per frame is trivial for canvas2d.
-  const TRAIL_MAX_POINTS = 3600;
-  const TRAIL_TRIM_SLACK = 300;
+  // Trimmed in batches (not one-by-one) so the O(n) array shift cost is
+  // amortized. See trailSampleThresholdDays() below for how many points a
+  // full geocentric loop ends up costing — this cap is sized to hold at
+  // least ~2 loops for every body, including the slowest outer planets,
+  // before old history starts getting trimmed while playing.
+  const TRAIL_MAX_POINTS = 4500;
+  const TRAIL_TRIM_SLACK = 400;
   const EARTH_PERIOD = BODY_BY_KEY.earth.period;
 
-  // The geocentric loop a planet traces completes once per synodic period,
-  // not once per its own (sidereal) orbital period. For outer planets the
-  // sidereal period is huge (Neptune: ~165 years) while the loop as seen
-  // from Earth still closes in about a year — sampling by sidereal period
-  // was 100+ simulated days between points, far too coarse for a ~1-year
-  // loop. Sampling by synodic period fixes that.
+  // The small retrograde wiggle a planet traces closes once per synodic
+  // period (how often Earth laps it). But the *big* loop that sweeps all
+  // the way around Earth — what "one full circle" on screen means — is
+  // governed by whichever of the two bodies' own (sidereal) periods is
+  // longer: for outer planets (a > 1 AU) that's the planet's own orbit
+  // (Saturn: ~29.4 years to circle the whole sky, same as its "Saturn
+  // Return" in astrology); for inner planets (Mercury, Venus) Earth's
+  // faster sidereal motion dominates instead, so the big loop closes once
+  // a year regardless of the inner planet's own (faster) period. Trails
+  // used to be sized off the synodic period alone, which is close to a
+  // year for every outer planet — fine for resolving the small wiggle, but
+  // far too short a window to ever complete the big loop (e.g. Saturn's
+  // ~29 year loop never closed no matter how long the sim ran).
   function synodicPeriodDays(body) {
     return 1 / Math.abs(1 / EARTH_PERIOD - 1 / body.period);
   }
+  function geoLoopPeriodDays(body) {
+    return Math.max(EARTH_PERIOD, body.period);
+  }
 
-  function maybeSampleTrail(key, synodicPeriod, dx, dy, sampleDate) {
-    const threshold = synodicPeriod / 240; // days
+  // Sample spacing (in simulated days) for a body's trail: fine enough to
+  // resolve the big loop in ~240 steps, but never coarser than resolving
+  // each small synodic wiggle in ~8 steps (otherwise, for outer planets
+  // where the big loop is many decades long, the wiggles would be under-
+  // sampled into a jagged/aliased mess) — whichever of the two is finer.
+  const TRAIL_SAMPLES_PER_BIG_LOOP = 240;
+  const TRAIL_MIN_SAMPLES_PER_SYNODIC_LOOP = 8;
+  function trailSampleThresholdDays(body) {
+    return Math.min(
+      geoLoopPeriodDays(body) / TRAIL_SAMPLES_PER_BIG_LOOP,
+      synodicPeriodDays(body) / TRAIL_MIN_SAMPLES_PER_SYNODIC_LOOP
+    );
+  }
+
+  function maybeSampleTrail(key, thresholdDays, dx, dy, sampleDate) {
     const last = lastSampleDate[key];
-    if (last === null || Math.abs(sampleDate - last) / MS_PER_DAY >= threshold) {
+    if (last === null || Math.abs(sampleDate - last) / MS_PER_DAY >= thresholdDays) {
       const arr = trails[key];
       arr.push({ dx, dy, date: sampleDate });
       if (arr.length > TRAIL_MAX_POINTS + TRAIL_TRIM_SLACK) {
@@ -477,7 +584,7 @@
     if (visibleBodies.length === 0) return;
     const totalDays = Math.abs(toDate - fromDate) / MS_PER_DAY;
     if (totalDays === 0) return;
-    const minThreshold = Math.min(...visibleBodies.map(b => synodicPeriodDays(b) / 240));
+    const minThreshold = Math.min(...visibleBodies.map(b => trailSampleThresholdDays(b)));
     const steps = Math.min(TRAIL_SUBSTEP_CAP, Math.max(1, Math.ceil(totalDays / minThreshold)));
     for (let i = 1; i <= steps; i++) {
       const t = fromDate.getTime() + (toDate.getTime() - fromDate.getTime()) * (i / steps);
@@ -485,7 +592,7 @@
       const earthPos = heliocentricPos(BODY_BY_KEY.earth, sampleDate);
       visibleBodies.forEach(b => {
         const p = heliocentricPos(b, sampleDate);
-        maybeSampleTrail(b.key, synodicPeriodDays(b), p.x - earthPos.x, p.y - earthPos.y, sampleDate);
+        maybeSampleTrail(b.key, trailSampleThresholdDays(b), p.x - earthPos.x, p.y - earthPos.y, sampleDate);
       });
     }
   }
@@ -660,7 +767,7 @@
 
       // sample + draw trails first (under the bodies)
       others.forEach(b => {
-        maybeSampleTrail(b.key, synodicPeriodDays(b), geoOf[b.key].dx, geoOf[b.key].dy, state.simDate);
+        maybeSampleTrail(b.key, trailSampleThresholdDays(b), geoOf[b.key].dx, geoOf[b.key].dy, state.simDate);
         drawTrail(ctx, cx, cy, trails[b.key], toPx, b.color, GEO_ROTATION_OFFSET);
       });
 
@@ -797,6 +904,7 @@
 
     render(positions);
     dateLabel.textContent = formatDate(state.simDate);
+    updateTrailAgeLabel();
 
     requestAnimationFrame(frame);
   }
