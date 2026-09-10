@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heliocentric vs Geocentric Orbit Simulator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Solar System: Two Points of View</h1>
+  <div class="date-display">
+    <span id="dateLabel">—</span>
+    <span id="yearSecLabel" class="year-sec"></span>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="control-group planet-list" id="planetList">
+    <!-- checkboxes injected by JS -->
+  </div>
+
+  <div class="control-group transport">
+    <button id="btnPlayPause" class="btn primary" title="Play / Pause (Space)">⏸ Pause</button>
+    <button id="btnSlower" class="btn" title="Slow down ([)">− Speed</button>
+    <span id="speedLabel" class="speed-label">1×</span>
+    <button id="btnFaster" class="btn" title="Speed up (])">+ Speed</button>
+    <button id="btnReverse" class="btn" title="Reverse direction of time">⇄ Reverse</button>
+    <button id="btnClearTrails" class="btn" title="Clear all tracks (C)">🧹 Clear tracks</button>
+  </div>
+
+  <div class="control-group date-controls">
+    <label for="dateInput">Start date</label>
+    <input type="date" id="dateInput">
+    <button id="btnNow" class="btn">Today</button>
+  </div>
+
+  <div class="control-group run-controls">
+    <label for="yearsInput">Run for</label>
+    <input type="number" id="yearsInput" min="1" max="1000" step="1" value="100">
+    <span>years</span>
+    <button id="btnRunYears" class="btn" title="Clear tracks and play forward for exactly this many years, then stop — speed is auto-set so the run finishes in about 25 seconds">▶ Run</button>
+    <span id="runStatus" class="run-status"></span>
+  </div>
+
+  <div class="control-group demos">
+    <button id="btnDemoMarsRetrograde" class="btn" title="Load a preset view of Mars's 2024-25 retrograde loop">🔴 Mars retrograde demo</button>
+  </div>
+
+  <div class="control-group share">
+    <button id="btnShare" class="btn" title="Copy a link with the current view encoded">🔗 Copy link</button>
+  </div>
+</div>
+
+<main class="stage">
+  <section class="panel">
+    <h2>Heliocentric <span class="sub">(Sun at center)</span></h2>
+    <div id="shortcutsPanel" class="shortcuts-bar">
+      <span class="shortcuts-label">Keyboard:</span>
+      <span><kbd>Space</kbd> Play/Pause</span>
+      <span><kbd>[</kbd> <kbd>]</kbd> Speed</span>
+      <span><kbd>\</kbd> Reset 128×</span>
+      <span><kbd>C</kbd> Clear tracks</span>
+    </div>
+    <canvas id="helioCanvas"></canvas>
+  </section>
+
+  <section class="panel">
+    <h2>Geocentric <span class="sub">(Earth at center)</span></h2>
+    <div class="panel-body">
+      <canvas id="geoCanvas"></canvas>
+      <div class="zoom-sidebar" id="geoZoomSidebar">
+        <button id="geoZoomIn" class="btn zoom-btn" title="Zoom in">+</button>
+        <input type="range" id="geoZoomSlider" class="zoom-slider" min="0.4" max="3" step="0.05" value="1" orient="vertical">
+        <button id="geoZoomOut" class="btn zoom-btn" title="Zoom out">−</button>
+        <span id="geoZoomLabel" class="zoom-label">100%</span>
+        <button id="geoZoomReset" class="btn zoom-reset" title="Reset zoom">Reset</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="note">
+  Orbits use circular approximations of real semi-major axes, sidereal periods and J2000 mean
+  longitudes — great for seeing relative motion and retrograde loops, not for precision ephemeris work.
+  Distances are square-root scaled per panel so inner and outer planets both fit on screen, and the
+  Moon's orbit is drawn at a fixed exaggerated radius so it stays visible next to Earth.
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
