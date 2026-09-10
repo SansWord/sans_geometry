@@ -14,6 +14,12 @@ Both panels are driven by the same underlying simplified orbital model and
 the same simulated date/time, so you can directly compare "where things
 really are" against "what it would look like standing on Earth."
 
+**Live demo:** [sansword.github.io/sans_geometry](https://sansword.github.io/sans_geometry/)
+— or jump straight to the
+[Mars retrograde demo](https://sansword.github.io/sans_geometry/#demo),
+which loads a preset (`date=1433-10-10`, `zoom=0.85`, `speed=128`) showing
+Mars trace out its retrograde loop in the geocentric panel.
+
 Open `index.html` in a browser (or serve the folder with any static file
 server, e.g. `python3 -m http.server`) — there is no build step and no
 external dependencies.
@@ -82,3 +88,16 @@ constants are used and where they come from, and
 [`docs/technical-decisions.md`](docs/technical-decisions.md) for the
 rendering and architecture choices behind the two panels, the trails, and
 the month ring.
+
+## Cost & how this was built
+
+This project was built collaboratively with
+[Claude Code](https://claude.com/claude-code):
+
+| Model | Session usage | Real time | Prompts |
+|-------|---------------|-----------|---------|
+| Claude Sonnet 5 | ~49% of the 5-hour session limit | ~2 hours | 14 |
+
+See [`docs/build-log.md`](docs/build-log.md) for a per-prompt breakdown of
+what was asked and what it cost, and [`docs/devlog.md`](docs/devlog.md)
+for the technical and process learnings from that session.
