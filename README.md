@@ -73,6 +73,18 @@ external dependencies.
   naturally toggle between them (for an outer planet, which never
   reaches true "new," between its peak and whatever its dimmest point
   is — e.g. Mars alternates between full and ~88% lit).
+- A **"Show Tychonic orbits" toggle** on the geocentric panel: overlays each
+  visible planet's true orbit centered on the Sun's current position rather
+  than Earth's — the [Tychonic system](https://en.wikipedia.org/wiki/Tychonic_system),
+  where Earth stays fixed and motionless (satisfying geocentrism) while the
+  planets orbit the Sun, which in turn orbits Earth. The planets' plotted
+  positions don't change — they're already the real Earth-relative
+  positions — so the rings just make visible the orbital structure behind
+  the same picture, including *why* Mercury and Venus's rings stay tucked
+  close to the Sun's own ring while the outer planets' rings extend far
+  past it. Hides the retrograde trails while it's on (without clearing
+  them — they resume from where they left off) since both together are too
+  busy to read.
 - The current view (selected bodies, date, speed, playing state, zoom,
   phase-widget body) is reflected live in the URL's query string, and a
   "Copy link" button copies a fully shareable URL.
@@ -97,6 +109,7 @@ playing at 30 simulated days per second.
 | `zoom`    | geocentric panel manual zoom, `0.4`–`3`              | `1`      |
 | `phase`   | which body the phase widget shows: `mercury,venus,mars,jupiter,saturn,uranus,neptune,pluto,moon` | first non-Sun, non-Earth body in `planets` (in the order given); `venus` if `planets` wasn't given, or requested only Sun and/or Earth |
 | `years`   | clears trails and runs forward exactly this many simulated years from `date`, then auto-stops (speed is auto-picked unless `speed` is also given) | unset — runs indefinitely |
+| `tychonic` | `1` to show the Tychonic orbit overlay on load                    | unset (`0`) |
 
 ## Accuracy
 

@@ -361,6 +361,35 @@ rounds to "100% lit" in the readout, so there's no visibly different "new"
 extreme to fast-forward to. Mars (min ~88%) and Jupiter (min ~99%) stay
 enabled since their dip is actually visible in the rounded readout.
 
+## Tychonic orbit overlay: point-sampled ring, not a drawn circle
+
+A planet's true orbit is a circle centered on the Sun, but `toPx()` maps
+*distance from Earth* to pixel radius through a non-linear (square-root)
+scale, and `geoXY()` places points by polar angle from Earth. Feeding a
+constant AU radius straight into `drawOrbitRing()` (as the heliocentric
+panel does, where distances genuinely are Sun-centered) would draw a
+circle centered on the Sun's *screen* position but sized/shaped as if the
+scale applied uniformly around it — which it doesn't, since the sqrt
+compression depends on each point's own distance from Earth, and points
+on a Sun-centered circle are at a range of different Earth-distances.
+
+Instead `drawTychonicRing()` walks 72 sample angles around the true AU-space
+circle (`sunGeo + orbitRadiusAU · (cosθ, sinθ)`), computes each sample
+point's real Earth-distance and Earth-angle, and pushes it through the
+exact same `toPx`/`geoXY` pipeline the trails and body dots already use.
+This guarantees the ring passes exactly through wherever that body is
+actually plotted (same math, no separate approximation to drift out of
+sync) at the cost of a polyline instead of a single `ctx.arc()` call.
+
+## Tychonic overlay hides trails without clearing them
+
+Trails and Tychonic rings drawn together were visually noisy (loops and
+dashed rings overlapping at the same scale), so the overlay's checkbox
+skips `drawTrail()` while checked. `maybeSampleTrail()` still runs every
+frame regardless — sampling and drawing were already separate calls in the
+same loop — so toggling the overlay off resumes the trail exactly where it
+would have been anyway, rather than showing a gap or restarting it.
+
 ## No build step, no dependencies
 
 Plain `index.html` + `style.css` + `script.js`, rendered with a single
