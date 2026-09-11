@@ -146,6 +146,26 @@ html {
   font-size: 0.7rem;
 }
 
+.tychonic-bar {
+  width: 100%;
+  max-width: 640px;
+  margin-bottom: 6px;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.tychonic-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.tychonic-toggle .sub {
+  color: var(--text-dim);
+  font-size: 0.95em;
+}
+
 .planet-chip {
   display: inline-flex;
   align-items: center;

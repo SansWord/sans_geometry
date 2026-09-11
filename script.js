@@ -126,6 +126,7 @@
     speed: DEFAULT_SPEED, // simulated days per real second (default when no ?speed= is given)
     playing: true,
     geoZoom: 1,        // manual zoom multiplier for the geocentric panel
+    showTychonic: false, // overlay Sun-centered orbit rings on the geocentric panel
     run: { target: null, startDate: null, completed: false }, // "Run for N years"
     trailsSince: null, // simDate as of the last trail clear; set below once simDate is finalized
     phaseBody: "venus", // placeholder; finalized below once ?planets= is parsed
@@ -155,6 +156,9 @@
   if (params.has("zoom")) {
     const z = parseFloat(params.get("zoom"));
     if (!isNaN(z) && z > 0) state.geoZoom = Math.min(3, Math.max(0.4, z));
+  }
+  if (params.has("tychonic")) {
+    state.showTychonic = params.get("tychonic") !== "0" && params.get("tychonic") !== "false";
   }
   // Phase widget default: the first ?planets= body that isn't the Sun or
   // Earth (already filtered to known keys above, so anything left after
@@ -691,6 +695,16 @@
   geoZoomReset.addEventListener("click", () => setGeoZoom(1));
 
   // ---------------------------------------------------------------------
+  // Tychonic orbit overlay toggle
+  // ---------------------------------------------------------------------
+  const tychonicToggle = document.getElementById("tychonicToggle");
+  tychonicToggle.checked = state.showTychonic;
+  tychonicToggle.addEventListener("change", () => {
+    state.showTychonic = tychonicToggle.checked;
+    syncUrlParams({ tychonic: state.showTychonic ? "1" : null });
+  });
+
+  // ---------------------------------------------------------------------
   // Canvas setup
   // ---------------------------------------------------------------------
   const helioCanvas = document.getElementById("helioCanvas");
@@ -956,6 +970,37 @@
     ctx.globalAlpha = 1;
   }
 
+  // Tychonic orbit ring: a planet's true circular orbit is centered on the
+  // Sun, not Earth, but toPx()/geoXY() work in Earth-centered polar
+  // coordinates with a non-linear (sqrt) distance scale — so a geometrically
+  // true circle around the Sun's current position does NOT project to a
+  // circle in screen space. It has to be walked point-by-point: each sample
+  // is "Sun's geocentric position + orbitRadiusAU in direction theta",
+  // converted through the same Earth-distance/angle -> pixel pipeline the
+  // trails and body dots already use, so a body's actual plotted position
+  // always lands exactly on this ring.
+  function drawTychonicRing(ctx, cx, cy, toPx, sunGeo, orbitRadiusAU, color, rotationOffset = 0) {
+    const SEGMENTS = 72;
+    ctx.beginPath();
+    for (let i = 0; i <= SEGMENTS; i++) {
+      const theta = (i / SEGMENTS) * Math.PI * 2;
+      const px = sunGeo.dx + orbitRadiusAU * Math.cos(theta);
+      const py = sunGeo.dy + orbitRadiusAU * Math.sin(theta);
+      const dist = Math.hypot(px, py);
+      const angle = Math.atan2(py, px) + rotationOffset;
+      const r = toPx(dist);
+      const { x, y } = geoXY(cx, cy, r, angle);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
   function drawMonthRing(ctx, cx, cy, R) {
     ctx.save();
     ctx.strokeStyle = "#5a6290";
@@ -1131,10 +1176,24 @@
       // reads directly as "roughly which month".
       drawMonthRing(ctx, cx, cy, size / 2 - 6);
 
-      // sample + draw trails first (under the bodies)
+      // Tychonic orbit structure: each visible planet's true orbit, drawn
+      // centered on the Sun's current (geocentric) position rather than
+      // Earth's. The planet dots below already use the real Earth-relative
+      // position (positions[b.key] - earth), so they land exactly on these
+      // rings — this overlay adds the "why" without changing where anything
+      // is actually plotted.
+      if (state.showTychonic) {
+        others.forEach(b => {
+          drawTychonicRing(ctx, cx, cy, toPx, sunGeo, b.a, b.color, GEO_ROTATION_OFFSET);
+        });
+      }
+
+      // sample + draw trails first (under the bodies) — sampling keeps
+      // running even while Tychonic rings hide the trails, so toggling back
+      // off picks up right where the trail actually is, nothing lost.
       others.forEach(b => {
         maybeSampleTrail(b.key, trailSampleThresholdDays(b), geoOf[b.key].dx, geoOf[b.key].dy, state.simDate);
-        drawTrail(ctx, cx, cy, trails[b.key], toPx, b.color, GEO_ROTATION_OFFSET);
+        if (!state.showTychonic) drawTrail(ctx, cx, cy, trails[b.key], toPx, b.color, GEO_ROTATION_OFFSET);
       });
 
       // Earth glyph fixed at center
